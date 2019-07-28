@@ -15,5 +15,3 @@ def gaussian_pdf(x, mu, sigma):
     denom = np.sqrt(2 * np.pi * var)
     
     return num / denom
-
-print(gaussian_pdf(7, 5, 5))

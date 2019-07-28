@@ -91,26 +91,53 @@ class GeneralNB(BaseNB):
                 
                 # don't factor NaNs into class likelihoods (probability of 1 is no-op)
                 self.cond_probs[label][col][np.nan] = 1
-                    
-
 
     def _joint_log_likelihood(self, X):
         """
         Calculates the log likelihood of each class.
         
-        Output: 2d array, shape (n_records, n_classes)
+        Output: 2d array, shape (n_samples, n_classes)
         """
-        # TODO: check that model is fitted
+        assert hasattr(self, 'cond_probs'), 'Model not fit' 
         
-        jll = 
+        def _vectorized_get(key, dict_):
+            return np.vectorize(dict_.__getitem__)(key)
+
+        class_probs_arr = np.atleast_2d([val for val in self.class_probs.values()])
+        jll = np.repeat(np.log(class_probs_arr), self.n_samples, axis=0)
+
+        for col in self.categorical_columns:
+            log_probs = np.log(np.stack([_vectorized_get(self.X[col].values, self.cond_probs[i][col])\
+                                         for i in self.classes_], axis=1))
+
+            # impute log cond prob to 0 in case of 0% cond prob in training set
+            # TODO: this should probably be a toggle option in case user wants to throw an error on unseen values
+            log_probs[log_probs == -np.inf] = 0
+
+            jll += log_probs
+
+        for col in self.numerical_columns:
+            log_probs_by_class = []
+            # willing to allow a O(n_features * n_classes) loop for now
+            for label in self.classes_:
+                mean = self.cond_probs[label][col]['mean']
+                std = self.cond_probs[label][col]['std']
+
+                # impute missing values to 0
+                log_probs = np.log(gaussian_pdf(self.X[feat].values, mean, std))
+                log_probs_0filled = np.nan_to_num(log_probs)
+
+                log_probs_by_class.append(log_probs_0filled)
+
+            log_probs_array = np.stack(log_probs_by_class, axis=1)
+            jll += log_probs_array
+        
+        return jll
 
     def predict(self, X, top_n=1):
         jll = self._joint_log_likelihood(X)
 
         return np.argmax(jll, axis=1)[:top_n]
-
-    def _mark_categorical_colums(self, X):
-        return X.select_dtypes(include=['category', 'object', 'bool'])
 
 if __name__ == '__main__':
     gnb = GeneralNB()

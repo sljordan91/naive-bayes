@@ -23,10 +23,15 @@ class GeneralNB(BaseNB):
     
     Categorical features can be used as-is with no encoding.
     Numerical features are assumed to follow a Gaussian distribution.
+    
+    Parameters
+    ----------
+    var_smooting : float, default=1e-9
+        Propotion of the largest variance added to all variances
+        for numerical stability purposes
 
     Attributes
     ----------
-
     X : pandas dataframes
         Features used in model training
 
@@ -44,16 +49,24 @@ class GeneralNB(BaseNB):
 
     n_classes : int
         Number of unique values in target vector y
+        
+    epsilon_ : float
+        Value added to all variances for numerical stabilibity
 
     categorical_columns : List[string]
         Names of categorical columns in X
 
     numerical_columns : List[string]
         Name of numerical columns in X
-
     """
+    
+    def __init__(self, var_smoothing=1e-9):
+        self.var_smoothing = var_smoothing
 
     def fit(self, X, y):
+        """
+        TODO: write docstring
+        """
         self.X = X
         self.y = y
 
@@ -64,6 +77,8 @@ class GeneralNB(BaseNB):
 
         self.categorical_columns = X.select_dtypes(exclude=('number',)).columns.tolist()
         self.numerical_columns = X.select_dtypes(include=('number',)).columns.tolist()
+        
+        self.epsilon_ = np.sqrt(self.var_smoothing * X[self.quant_features].var().max())
         
         # calculate class and conditional probabilities
         self.class_probs = dict()
@@ -78,11 +93,16 @@ class GeneralNB(BaseNB):
             for col in self.numerical_columns:
                 self.cond_probs[label][col] = dict()
                 cond_df = self.X.loc[self.y == label, col].values
+                
                 self.cond_probs[label][col]['mean'] = np.nanmean(cond_df)
                 self.cond_probs[label][col]['std'] = np.nanstd(cond_df)
+                
+                # add epsilon back to the standard dev of all numerical features
+                self.cond_probs[label][col]['std'] += self.epsilon_
             
             for col in self.categorical_columns:
-                # don't factor untrained values into class likelihoods (probability of 1 is no-op)
+                # this allows the model to score records with unobserved predictors
+                # with no impacts to probabilities (probability of 1 is no-op)
                 self.cond_probs[label][col] = defaultdict(lambda: 1)
                 
                 for value in self.df[col].unique():
@@ -97,7 +117,7 @@ class GeneralNB(BaseNB):
         Calculates the log likelihood of each class.
         
         Output: 2d array, shape (n_samples, n_classes)
-        """
+        """ 
         assert hasattr(self, 'cond_probs'), 'Model not fit' 
         
         def _vectorized_get(key, dict_):
@@ -118,7 +138,7 @@ class GeneralNB(BaseNB):
 
         for col in self.numerical_columns:
             log_probs_by_class = []
-            # willing to allow a O(n_features * n_classes) loop for now
+            # willing to allow an O(n_features * n_classes) loop for now
             for label in self.classes_:
                 mean = self.cond_probs[label][col]['mean']
                 std = self.cond_probs[label][col]['std']
@@ -138,6 +158,7 @@ class GeneralNB(BaseNB):
         jll = self._joint_log_likelihood(X)
 
         return np.argmax(jll, axis=1)[:top_n]
+
 
 if __name__ == '__main__':
     gnb = GeneralNB()
